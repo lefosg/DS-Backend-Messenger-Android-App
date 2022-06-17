@@ -142,11 +142,12 @@ public class ClientHandler implements Runnable {
                             //    }
                             //}
                             if (messageFromClient.getMultiMediaFile() != null) {
-                                Value file_sent_msg = new Value(clientNickname + " sent a file (" + messageFromClient.getMultiMediaFile().getFileName() + ")");
-                                file_sent_msg.setSender(clientUsername);
-                                broadcastMessage(file_sent_msg, currentTopic);
+//                                Value file_sent_msg = new Value(clientNickname + " sent a file (" + messageFromClient.getMultiMediaFile().getFileName() + ")");
+//                                file_sent_msg.setSender(clientUsername);
+//                                broadcastMessage(file_sent_msg, currentTopic);
                                 if (!secretChat) {
-                                    broker.addMessageToTopic(file_sent_msg, currentTopic);
+                                    //broker.addMessageToTopic(file_sent_msg, currentTopic);
+                                    broker.addMessageToTopic(messageFromClient, currentTopic);
                                 }
                             }
                         }
