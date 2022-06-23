@@ -13,6 +13,7 @@ public class ClientHandler implements Runnable {
     private String currentTopic;
     private boolean clientIsConnectedToTopic;
     private boolean secretChat = false;
+    private boolean changeBroker = false;
 
     //IO objects
     public static ArrayList<ClientHandler> clientHandlers  = new ArrayList<>();
@@ -35,6 +36,9 @@ public class ClientHandler implements Runnable {
             //Client Information Init
             clientUsername = (String)reader.readObject();  //read username
             clientBlockedUsers = (ArrayList<String>) reader.readObject();
+            Value v = new Value("GET_DEFAULT_IMAGES");
+            v.setCommand(true);
+            sendBack(v);
             writer.writeObject(new Value(new MultimediaFile("res/TopicImages/default_topic_image.png", null)));
             writer.writeObject(new Value(new MultimediaFile("res/defaultpfp.png", null)));
             clientHandlers.add(this);
@@ -55,6 +59,9 @@ public class ClientHandler implements Runnable {
                         Value messageFromClient;
                         currentTopic = ((Value) reader.readObject()).getMessage();  //first read the topic
                         redirectClient(currentTopic);  //check if client is in the right broker to talk to this topic
+                        if (changeBroker == true) {
+                            break;
+                        }
                         clientIsConnectedToTopic = true;
                         //obtain previous messages and send them to the client
                         ArrayList<Value> previous_messages = broker.getChatData(currentTopic);
@@ -123,6 +130,16 @@ public class ClientHandler implements Runnable {
                                         clientNickname = nickname;
                                         continue;
                                     }
+                                    else if(messageFromClient.getMessage().contains("set_topic_name")){
+                                        String topicName = messageFromClient.getMessage().substring("set_topic_name".length() + 1);
+                                        Value v = new Value("set_topic_name" + " " + currentTopic + " " + topicName);
+                                        v.setCommand(true);
+                                        updateClients(v, currentTopic);
+                                        broker.getTopic(currentTopic).setName(topicName);
+                                        clientSubbedTopics.set(clientSubbedTopics.indexOf(currentTopic),topicName);
+                                        currentTopic = topicName;
+                                        continue;
+                                    }
                                 }
                                 //if topic is in secret mode, don't save message
                                 if (!secretChat) {
@@ -156,8 +173,11 @@ public class ClientHandler implements Runnable {
                     case "CREATE": {
                         String topic_to_create = ((Value) reader.readObject()).getMessage();
                         BrokerAddressInfo responsible = broker.findResponsibleBrokerAddress(topic_to_create);
+                        System.out.println(responsible);
                         if (!broker.checkRightBroker(responsible, broker.getAddressInfo())) {
                             Integer newBroker = broker.getAddressToSocketMapper().get(responsible.toString());
+                            System.out.println(broker.getAddressToSocketMapper());
+                            System.out.println(newBroker);
                             broker.sendToOtherBroker(newBroker, new Value("CREATE"));
                             broker.sendToOtherBroker(newBroker, new Value(topic_to_create + " " + clientUsername));
                         } else {
@@ -270,6 +290,7 @@ public class ClientHandler implements Runnable {
             sendBack(v);
             sendBack(new Value(responsible.toString()));
             sendBack(new Value(topic));
+            changeBroker = true;
         }
     }
 
@@ -323,6 +344,20 @@ public class ClientHandler implements Runnable {
             try{
                if (clientHandler.clientIsConnectedToTopic && clientHandler.currentTopic.equals(currentTopic)
                    && !clientHandler.clientUsername.equals(clientUsername) && !clientBlockedUsers.contains(clientHandler.clientUsername)) {
+                    clientHandler.writer.writeObject(message);
+                    clientHandler.writer.flush();
+                }
+            } catch (IOException e) {
+                closeEverything(socket,reader,writer);
+            }
+        }
+    }
+
+    public void updateClients(Value message, String topic){
+        for (ClientHandler clientHandler : clientHandlers){
+            try{
+                if (!clientHandler.clientUsername.equals(clientUsername) &&
+                        !clientBlockedUsers.contains(clientHandler.clientUsername)) {
                     clientHandler.writer.writeObject(message);
                     clientHandler.writer.flush();
                 }

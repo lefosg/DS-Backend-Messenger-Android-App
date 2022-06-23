@@ -72,7 +72,6 @@ public class Broker implements BrokerInterface
         broker.init();  //thread
         broker.connect();
         broker.createDefaultTopics("src/com/ds/default_topics.txt");
-        broker.disconnect(); //thread
         broker.executeCommands();
     }
 
@@ -171,6 +170,7 @@ public class Broker implements BrokerInterface
                             broker.addressToHash.put(newBrokerAddress, sha1(newBrokerAddress.toString()));
                             broker.addressToSocketMapper.put(newBrokerAddress.toString(), addressToSocketMapper.size());
                             broker.listen(socket, ois);
+                            broker.disconnect(socket, ois);
                             continue;
                         }
                         broker.logToConsole("A new Client (" + s + ") has connected");
@@ -328,6 +328,8 @@ public class Broker implements BrokerInterface
 
     public synchronized void sendToOtherBroker(int broker, Value v) {
         try {
+            System.out.println("send to broker: " + broker);
+            System.out.println("value: " + v);
             writers.get(broker).writeObject(v);
             writers.get(broker).flush();
         } catch (Exception e) {
@@ -387,6 +389,7 @@ public class Broker implements BrokerInterface
                         addressToHash.put(newBrokerAddress, sha1(newBrokerAddress.toString()));
                         addressToSocketMapper.put(newBrokerAddress.toString(), addressToSocketMapper.size());
                         listen(socket, ois);
+                        disconnect(socket, ois);
                     } catch (Exception e) {
                         System.out.println("destination unreachable");
                     }
@@ -418,6 +421,28 @@ public class Broker implements BrokerInterface
                                     || !broker.sockets.get(i).getInetAddress().isReachable(1500)) {
                                 broker.logToConsole("removing socket " + broker.sockets.get(i));
                                 broker.closeConnections(i);
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+        }).start();
+    }
+
+    public void disconnect(Socket socket, ObjectInputStream ois) {
+        Broker broker = this;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Thread.currentThread().setPriority(8);
+                while (!broker.serverSocket.isClosed()) {
+                    while (!socket.isClosed()) {
+                        try {
+                            if (!socket.getInetAddress().isReachable(1500)) {
+                                broker.logToConsole("removing socket " + broker.sockets.get(broker.sockets.indexOf(socket)));
+                                broker.closeConnections(broker.sockets.indexOf(socket));
                             }
                         } catch (Exception e) {
                             e.printStackTrace();
@@ -482,6 +507,8 @@ public class Broker implements BrokerInterface
 
     public BrokerAddressInfo findResponsibleBrokerAddress(String topic){
         BigInteger topicHashKey = sha1(topic);
+        System.out.println(sockets.size());
+        System.out.println("AAAAAAAAAAAAAAAAA");
         int rightBroker = topicHashKey.intValue() % 3;
         if(rightBroker < 0){
             rightBroker = abs(rightBroker);
@@ -493,7 +520,7 @@ public class Broker implements BrokerInterface
         }
         return null;
     }
-    public boolean checkRightBroker(BrokerAddressInfo rightBrokerAddress, BrokerAddressInfo addressInfo) {
+    public synchronized boolean checkRightBroker(BrokerAddressInfo rightBrokerAddress, BrokerAddressInfo addressInfo) {
         System.out.println(rightBrokerAddress.equals(addressInfo));
         if(!rightBrokerAddress.equals(addressInfo)){
             return false;

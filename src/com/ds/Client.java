@@ -17,6 +17,8 @@ public class Client implements Publisher, Consumer
     private static final String FRIEND_REQUEST = "friend_request";
     private static final String FRIEND_REQUEST_RESPONSE = "friend_request_response";
     private static final String UPLOAD_TOPIC_IMAGE = "upload_topic_image";
+    private static final String SET_TOPIC_NAME = "set_topic_name";
+
     //Profile Information
     private ProfileName profile;
     private ArrayList<String> retrieved_topics = new ArrayList<>();
@@ -436,6 +438,11 @@ public class Client implements Publisher, Consumer
                     continue;
                 }
                 push(new Value(fileToSend));
+                continue;
+            }
+            //set topic name
+            else if(messageToSend.contains(SET_TOPIC_NAME)){
+                push(new Value(messageToSend));
                 continue;
             }
             //enter secret chat
