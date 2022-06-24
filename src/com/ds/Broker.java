@@ -12,7 +12,6 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static java.lang.Math.abs;
-import static java.lang.Math.sqrt;
 
 public class Broker implements BrokerInterface
 {
@@ -32,6 +31,10 @@ public class Broker implements BrokerInterface
     private ArrayList<MultimediaFile> stories = new ArrayList<>();
     private int story_deletion_delay = 60;
     private String imgPath = "res/TopicImages/";
+    private ArrayList<String> allTopicNames = new ArrayList<>();
+    private ArrayList<MultimediaFile> allTopicImages = new ArrayList<>();
+    public final HashMap<String,ArrayList<String>> topicToSubs;
+
 
     private static class ShutDownTask extends Thread {
         Broker broker;
@@ -104,6 +107,8 @@ public class Broker implements BrokerInterface
                     //imgPath+=".jpg";
                     topics.add(new Topic(topicName,temp_imgPath));
                 }
+                allTopicNames.add(topicName);
+                allTopicImages.add(new MultimediaFile(imgPath + counter + ".jpg", null));
             }
         } catch (Exception e) {
             System.out.print("Could not create default topics");
@@ -120,6 +125,7 @@ public class Broker implements BrokerInterface
         readers = new ArrayList<>();
         localPortToPort = new HashMap<>();
         addressToHash = new HashMap<>();
+        topicToSubs = new HashMap<>();
         try  {
             serverSocket = new ServerSocket(addressInfo.getPort(),20);
             FileWriter fileWriter = new FileWriter("src/com/ds/brokers_up.txt", true);
@@ -204,10 +210,23 @@ public class Broker implements BrokerInterface
             topic.subscribe(username);
             topics.add(topic);
         }
+
+        topicToSubs.put(topic_name,getTopic(topic_name).getClientsSubbed());
+        updateBrokers();
+    }
+
+    public void updateBrokers(){
+        for (int i =0; i< sockets.size();i++){
+            System.out.println(topicToSubs);
+            sendToOtherBroker(i,topicToSubs);
+        }
     }
 
     public synchronized void subscribe(String topic, String username) {
         getTopic(topic).subscribe(username);
+
+        topicToSubs.put(topic,getTopic(topic).getClientsSubbed());
+        updateBrokers();
     }
 
     public synchronized void unsubscribe(String topic_name, String username) {
@@ -217,6 +236,9 @@ public class Broker implements BrokerInterface
         } else {
             System.out.println(username + " exited the topic " + topic_name);
             topics.get(topics.indexOf(topic)).unsubscribe(username);
+
+            topicToSubs.put(topic_name,getTopic(topic_name).getClientsSubbed());
+            updateBrokers();
         }
     }
 
@@ -300,25 +322,66 @@ public class Broker implements BrokerInterface
         new Thread(new Runnable() {
             @Override
             public void run() {
+                int brokerIndex = sockets.indexOf(socket);
+                System.out.println(brokerIndex);
                 while (!socket.isClosed()) {
                     try {
-                        Value msg = (Value)ois.readObject();
-                        System.out.println("LISTEN TOY BROKER: " + msg);
-                        // if broker must create topic
-                        if (msg.getMessage().equals("CREATE")) {
-                            String topic_name = ((Value)ois.readObject()).getMessage(); //format of this message: ds alex
-                            System.out.println(topic_name);
-                            String[] info = topic_name.split(" ");
-                            createTopic(info[0], info[1]);
+                        Object msg2 = ois.readObject();
+                        System.out.println("Good " + msg2);
+                        if(msg2 instanceof HashMap){
+                            HashMap<String,ArrayList<String>> mapinfo = (HashMap<String,ArrayList<String>>) msg2;
+                            System.out.println("Map Info " + mapinfo);
+                            System.out.println(msg2);
+                            System.out.println(((HashMap<?, ?>) msg2).get("zzzzzzzzzzzzzzzzzzz"));
+                        }else {
+                            Value msg = (Value) ois.readObject();
+                            System.out.println("LISTEN TOY BROKER: " + msg);
+                            // if broker must create topic
+                            if (msg.getMessage().equals("CREATE")) {
+                                String topic_name = ((Value) ois.readObject()).getMessage(); //format of this message: ds alex
+                                System.out.println(topic_name);
+                                String[] info = topic_name.split(" ");
+                                createTopic(info[0], info[1]);
+                            }
+                            // if broker must unsubscribe a user from a topic
+                            else if (msg.getMessage().equals("UNSUB")) {
+                                String topic_name = ((Value) ois.readObject()).getMessage();
+                                System.out.println(topic_name);
+                                String[] info = topic_name.split(" ");
+                                unsubscribe(info[0], info[1]);
+                            }
+                            //if broker must subscribe a user to a topic
+                            else if (msg.getMessage().equals("SUB")) {
+                                String[] info = ((Value) ois.readObject()).getMessage().split(" ");
+                                String topicName = info[0];
+                                String username = info[1];
+                                subscribe(topicName, username);
+                            }
+                            //if another broker wants to get the available topics
+//                        else if (msg.getMessage().equals("GET_AVAILABLE_TOPICS")) {
+//                            ArrayList<String> topicNames = getTopicNames();
+//                            sendToOtherBroker(brokerIndex, new Value("GET_TOPICS"));
+//                            writers.get(brokerIndex).writeObject(topicNames);
+//
+//                        }
+//                        //get the topics that we asked for
+//                        else if (msg.getMessage().contains("GET_TOPICS")) {
+//                            allTopicNames.add(msg.getMessage().split(" ")[1]);
+//                        }
+//                        //if another broker wants to get the available topics images
+//                        else if (msg.getMessage().equals("GET_AVAILABLE_TOPICS_IMAGES")) {
+//                            ArrayList<MultimediaFile> topicNames = getTopicImages();
+//                            for (MultimediaFile topicImage : topicNames) {
+//                                sendToOtherBroker(brokerIndex, new Value("GET_TOPIC_IMAGE"));
+//                                sendToOtherBroker(brokerIndex, new Value(topicImage));
+//                            }
+//                        }
+//                        //get the topic images that we asked for
+//                        else if (msg.getMessage().contains("GET_TOPIC_IMAGE")) {
+//                            MultimediaFile topicImage = ((Value)ois.readObject()).getMultiMediaFile();
+//                            allTopicImages.add(topicImage);
+//                        }
                         }
-                        // if broker must unsubscribe a user from a topic
-                        else if (msg.getMessage().equals("UNSUB")) {
-                            String topic_name = ((Value)ois.readObject()).getMessage();
-                            System.out.println(topic_name);
-                            String[] info = topic_name.split(" ");
-                            unsubscribe(info[0], info[1]);
-                        }
-
                     } catch (Exception ignored) {
                     }
                 }
@@ -332,6 +395,17 @@ public class Broker implements BrokerInterface
             System.out.println("value: " + v);
             writers.get(broker).writeObject(v);
             writers.get(broker).flush();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public synchronized void sendToOtherBroker(int broker, HashMap<String,ArrayList<String>> info) {
+        try {
+            System.out.println("AAAA");
+            writers.get(broker).writeObject(info);
+            writers.get(broker).flush();
+            writers.get(broker).reset();
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -507,8 +581,6 @@ public class Broker implements BrokerInterface
 
     public BrokerAddressInfo findResponsibleBrokerAddress(String topic){
         BigInteger topicHashKey = sha1(topic);
-        System.out.println(sockets.size());
-        System.out.println("AAAAAAAAAAAAAAAAA");
         int rightBroker = topicHashKey.intValue() % 3;
         if(rightBroker < 0){
             rightBroker = abs(rightBroker);
@@ -565,6 +637,9 @@ public class Broker implements BrokerInterface
         for (Topic topic:topics) {
             topic_names.add(topic.getName());
         }
+//        for (int i = 0; i < sockets.size(); i++) {
+//            sendToOtherBroker(i, new Value("GET_AVAILABLE_TOPICS"));
+//        }
         return topic_names;
     }
 
@@ -599,6 +674,18 @@ public class Broker implements BrokerInterface
     }
     public synchronized HashMap<String, Integer> getAddressToSocketMapper() {
         return addressToSocketMapper;
+    }
+    public ArrayList<String> getAllTopicNames() {
+        return allTopicNames;
+    }
+    public void setAllTopicNames(ArrayList<String> allTopicNames) {
+        this.allTopicNames = allTopicNames;
+    }
+    public ArrayList<MultimediaFile> getAllTopicImages() {
+        return allTopicImages;
+    }
+    public void setAllTopicImages(ArrayList<MultimediaFile> allTopicImages) {
+        this.allTopicImages = allTopicImages;
     }
 
     @Override

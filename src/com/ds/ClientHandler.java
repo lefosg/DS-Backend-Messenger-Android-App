@@ -100,24 +100,9 @@ public class ClientHandler implements Runnable {
                                     //check if client wants to change topic image
                                     else if (messageFromClient.getMessage().contains("upload_topic_image")) {
                                         MultimediaFile img = ((Value) reader.readObject()).getMultiMediaFile();
-                                        //byte[] img_bytes_chunk = new byte[img_chunk.getMultimediaFileChunk().length];
-                                        //for (int i = 0; i < img_chunk.getMultimediaFileChunk().length; i++) {
-                                        //    img_bytes_chunk[i] = img_chunk.getMultimediaFileChunk()[i];
-                                        //}
-                                        //while (img_chunk.getMf() == 1) {
-                                        //    System.out.println("more");
-                                        //    img_chunk = ((Value) reader.readObject()).getMultiMediaFile();
-                                        //    byte[] story_bytes_chunk_temp = new byte[img_chunk.getMultimediaFileChunk().length];
-                                        //    for (int i = 0; i < img_chunk.getMultimediaFileChunk().length; i++) {
-                                        //        story_bytes_chunk_temp[i] = img_chunk.getMultimediaFileChunk()[i];
-                                        //    }
-                                        //    ByteBuffer bb = ByteBuffer.allocate(img_bytes_chunk.length + story_bytes_chunk_temp.length);
-                                        //    bb.put(img_bytes_chunk);
-                                        //    bb.put(story_bytes_chunk_temp);
-                                        //    img_bytes_chunk = bb.array();
-                                        //}
-                                        //MultimediaFile img = new MultimediaFile(img_chunk, img_bytes_chunk);
-                                        if (img != null && img.getMf() == 0) {
+
+                                        MultimediaFile final_image = reconstructImage(img);
+                                        if (final_image != null && final_image.getMf() == 0) {
                                             broker.getTopic(currentTopic).topicPicture = img;
                                             System.out.println(broker.getTopic(currentTopic).topicPicture.toString());
                                         }
@@ -147,6 +132,17 @@ public class ClientHandler implements Runnable {
                                 }
                             }
                             //messageFromClient.setMessage(clientNickname + ": " + messageFromClient.getMessage());
+                            if (messageFromClient.getMultiMediaFile() != null) {
+                                 MultimediaFile reconstructedFile = reconstructImage(messageFromClient.getMultiMediaFile());
+//                                Value file_sent_msg = new Value(clientNickname + " sent a file (" + messageFromClient.getMultiMediaFile().getFileName() + ")");
+//                                file_sent_msg.setSender(clientUsername);
+//                                broadcastMessage(file_sent_msg, currentTopic);
+                                if (!secretChat) {
+                                    messageFromClient.setMultiMediaFile(reconstructedFile);
+                                    //broker.addMessageToTopic(file_sent_msg, currentTopic);
+                                    broker.addMessageToTopic(messageFromClient, currentTopic);
+                                }
+                            }
                             broadcastMessage(messageFromClient, currentTopic);
 
                             //send file
@@ -158,15 +154,6 @@ public class ClientHandler implements Runnable {
                             //        broker.addMessageToTopic(file_sent_msg, currentTopic);
                             //    }
                             //}
-                            if (messageFromClient.getMultiMediaFile() != null) {
-//                                Value file_sent_msg = new Value(clientNickname + " sent a file (" + messageFromClient.getMultiMediaFile().getFileName() + ")");
-//                                file_sent_msg.setSender(clientUsername);
-//                                broadcastMessage(file_sent_msg, currentTopic);
-                                if (!secretChat) {
-                                    //broker.addMessageToTopic(file_sent_msg, currentTopic);
-                                    broker.addMessageToTopic(messageFromClient, currentTopic);
-                                }
-                            }
                         }
                         break;
                     }
@@ -188,8 +175,18 @@ public class ClientHandler implements Runnable {
                     }
                     case "SUB": {
                         String topic_to_sub = ((Value) reader.readObject()).getMessage();
-                        broker.subscribe(topic_to_sub, clientUsername);
-                        clientSubbedTopics.add(topic_to_sub);
+                        BrokerAddressInfo responsible = broker.findResponsibleBrokerAddress(topic_to_sub);
+                        System.out.println(responsible);
+                        if (!broker.checkRightBroker(responsible, broker.getAddressInfo())) {
+                            Integer newBroker = broker.getAddressToSocketMapper().get(responsible.toString());
+                            System.out.println(broker.getAddressToSocketMapper());
+                            System.out.println(newBroker);
+                            broker.sendToOtherBroker(newBroker, new Value("SUB"));
+                            broker.sendToOtherBroker(newBroker, new Value(topic_to_sub + " " + clientUsername));
+                        } else {
+                            broker.subscribe(topic_to_sub, clientUsername);
+                            clientSubbedTopics.add(topic_to_sub);
+                        }
                         break;
                     }
                     case "UNSUB": {
@@ -219,11 +216,30 @@ public class ClientHandler implements Runnable {
                         Value v = new Value("RETRIEVE_TOPICS");
                         v.setCommand(true);
                         sendBack(v);
-                        writer.writeObject(broker.getTopicNames());  //send topic names
-                        writer.flush();
-                        writer.writeObject(broker.getTopicImages());  //send topic images
-                        writer.flush();
-
+                        try {
+                            ArrayList<String> topicNames = broker.getAllTopicNames();
+//                            while (broker.getRetrieved_topics().size()==0) {
+//                                if (broker.getRetrieved_topics().size()!=0) {
+//                                    break;
+//                                }
+//                            }
+//                            Thread.sleep(100);
+//                            topicNames.addAll(broker.getRetrieved_topics());
+                            writer.writeObject(topicNames);  //send topic names
+                            writer.flush();
+                            ArrayList<MultimediaFile> topicImages = broker.getAllTopicImages();
+//                            while (broker.getRetrieved_topics_images().size() == 0) {
+//                                if (broker.getRetrieved_topics_images().size()!=0) {
+//                                    break;
+//                                }
+//                            }
+//                            Thread.sleep(100);
+//                            topicImages.addAll(broker.getRetrieved_topics_images());
+                            writer.writeObject(topicImages);  //send topic images
+                            writer.flush();
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
                         break;
                     }
                     case "BLOCK_USER": {
@@ -237,24 +253,9 @@ public class ClientHandler implements Runnable {
                         break;
                     }
                     case "UPLOAD_STORY": {
-                        //MultimediaFile story_chunk = ((Value) reader.readObject()).getMultiMediaFile();
-                        //byte[] story_bytes_chunk = new byte[story_chunk.getMultimediaFileChunk().length];
-                        //for(int i=0; i < story_chunk.getMultimediaFileChunk().length; i++) {
-                        //    story_bytes_chunk[i] = story_chunk.getMultimediaFileChunk()[i];
-                        //}
-                        //while (story_chunk.getMf() == 1){
-                        //    System.out.println("more");
-                        //    story_chunk = ((Value) reader.readObject()).getMultiMediaFile();
-                        //    byte[] story_bytes_chunk_temp = new byte[story_chunk.getMultimediaFileChunk().length];
-                        //    for(int i=0; i < story_chunk.getMultimediaFileChunk().length; i++) {
-                        //        story_bytes_chunk_temp[i] = story_chunk.getMultimediaFileChunk()[i];
-                        //    }
-                        //    ByteBuffer bb = ByteBuffer.allocate(story_bytes_chunk.length+story_bytes_chunk_temp.length);
-                        //    bb.put(story_bytes_chunk);
-                        //    bb.put(story_bytes_chunk_temp);
-                        //    story_bytes_chunk = bb.array();
-                        //}
-                        MultimediaFile story = ((Value)reader.readObject()).getMultiMediaFile();
+                        MultimediaFile story_chunk = ((Value) reader.readObject()).getMultiMediaFile();
+
+                        MultimediaFile story = reconstructImage(story_chunk);
                         broker.addStory(story);
                         break;
                     }
@@ -309,6 +310,33 @@ public class ClientHandler implements Runnable {
             writer.flush();
         } catch (Exception e ) {
             e.printStackTrace();
+        }
+    }
+
+    private MultimediaFile reconstructImage(MultimediaFile story_chunk) {
+        try {
+            //MultimediaFile story_chunk = ((Value) reader.readObject()).getMultiMediaFile();
+            byte[] story_bytes_chunk = new byte[story_chunk.getMultimediaFileChunk().length];
+            for (int i = 0; i < story_chunk.getMultimediaFileChunk().length; i++) {
+                story_bytes_chunk[i] = story_chunk.getMultimediaFileChunk()[i];
+            }
+            while (story_chunk.getMf() == 1) {
+                System.out.println("more");
+                story_chunk = ((Value) reader.readObject()).getMultiMediaFile();
+                byte[] story_bytes_chunk_temp = new byte[story_chunk.getMultimediaFileChunk().length];
+                for (int i = 0; i < story_chunk.getMultimediaFileChunk().length; i++) {
+                    story_bytes_chunk_temp[i] = story_chunk.getMultimediaFileChunk()[i];
+                }
+                ByteBuffer bb = ByteBuffer.allocate(story_bytes_chunk.length + story_bytes_chunk_temp.length);
+                bb.put(story_bytes_chunk);
+                bb.put(story_bytes_chunk_temp);
+                story_bytes_chunk = bb.array();
+            }
+            MultimediaFile story = ((Value) reader.readObject()).getMultiMediaFile();
+            return story;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return null;
         }
     }
 

@@ -128,7 +128,12 @@ public class Topic
     }
 
     public String getClientNickname(String username) {
-        return nicknames.get(clientsSubbed.indexOf(username));
+        if (clientsSubbed.contains(username)) {
+           return nicknames.get(clientsSubbed.indexOf(username));
+        }
+        else {
+            return username;
+        }
     }
 
     public String getClientUsernames() {
