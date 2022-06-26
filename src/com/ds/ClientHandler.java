@@ -104,7 +104,13 @@ public class ClientHandler implements Runnable {
                                         MultimediaFile final_image = reconstructImage(img);
                                         if (final_image != null && final_image.getMf() == 0) {
                                             broker.getTopic(currentTopic).topicPicture = img;
+                                            broker.getAllTopicImages().set(broker.getAllTopicNames().indexOf(currentTopic),final_image);
                                             System.out.println(broker.getTopic(currentTopic).topicPicture.toString());
+                                            Value v = new Value("get_topic_image"+" "+currentTopic);
+                                            v.setCommand(true);
+                                            updateClients(v, currentTopic);
+
+                                            updateClients(new Value(final_image),currentTopic);
                                         }
                                         continue;
                                     }
@@ -295,6 +301,25 @@ public class ClientHandler implements Runnable {
         }
     }
 
+    public void redirectClient1(String topic,BrokerAddressInfo info) {
+        //sha1(topic) % broker.getSockets().size();
+        Value v = new Value("WRONG_BROKER");
+        v.setCommand(true);
+        sendBack(v);
+        sendBack(new Value(info.toString()));
+        sendBack(new Value(topic));
+        changeBroker = true;
+    }
+
+    public void redirectClient2(BrokerAddressInfo info) {
+        //sha1(topic) % broker.getSockets().size();
+        Value v = new Value("WRONG_BROKER_NOTOPIC");
+        v.setCommand(true);
+        sendBack(v);
+        sendBack(new Value(info.toString()));
+        changeBroker = true;
+    }
+
     private void sendFriendRequest(String name) {
         try {
             for (ClientHandler clientHandler : clientHandlers) {
@@ -385,7 +410,7 @@ public class ClientHandler implements Runnable {
         for (ClientHandler clientHandler : clientHandlers){
             try{
                 if (!clientHandler.clientUsername.equals(clientUsername) &&
-                        !clientBlockedUsers.contains(clientHandler.clientUsername)) {
+                        clientHandler.clientSubbedTopics.contains(topic)) {
                     clientHandler.writer.writeObject(message);
                     clientHandler.writer.flush();
                 }
@@ -393,6 +418,22 @@ public class ClientHandler implements Runnable {
                 closeEverything(socket,reader,writer);
             }
         }
+    }
+
+    public String getCurrentTopic() {
+        return currentTopic;
+    }
+
+    public void setCurrentTopic(String currentTopic) {
+        this.currentTopic = currentTopic;
+    }
+
+    public boolean isClientIsConnectedToTopic() {
+        return clientIsConnectedToTopic;
+    }
+
+    public void setClientIsConnectedToTopic(boolean clientIsConnectedToTopic) {
+        this.clientIsConnectedToTopic = clientIsConnectedToTopic;
     }
 
     public void toggleSecretChat(boolean _secretChat) {

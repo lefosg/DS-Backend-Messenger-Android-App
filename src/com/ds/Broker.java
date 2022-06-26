@@ -29,11 +29,14 @@ public class Broker implements BrokerInterface
     private HashMap<BrokerAddressInfo, Integer> brokerAddressToId = new HashMap<>();
     private HashMap<String, Integer> addressToSocketMapper = new HashMap<>();
     private ArrayList<MultimediaFile> stories = new ArrayList<>();
+    ArrayList <ClientHandler> chs ;
+    private HashMap<String,BrokerAddressInfo> topictoBroker = new HashMap<>();
     private int story_deletion_delay = 60;
     private String imgPath = "res/TopicImages/";
     private ArrayList<String> allTopicNames = new ArrayList<>();
     private ArrayList<MultimediaFile> allTopicImages = new ArrayList<>();
     public final HashMap<String,ArrayList<String>> topicToSubs;
+    private final ArrayList<Integer> deadBrockers;
 
 
     private static class ShutDownTask extends Thread {
@@ -50,6 +53,28 @@ public class Broker implements BrokerInterface
                         .filter(line -> !line.contains(broker.getAddressInfo().getIp()+":"+broker.getAddressInfo().getPort()))
                         .collect(Collectors.toList());
                 Files.write(file.toPath(), out, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING);
+                for(ClientHandler c : broker.chs) {
+                    if (c.isClientIsConnectedToTopic()) {
+                        int right = broker.sha1(c.getCurrentTopic()).intValue() % (broker.sockets.size() + 1);
+                        c.redirectClient1(c.getCurrentTopic(), broker.brokerInfo.get(right));
+                    } else {
+                        for (BrokerAddressInfo br : broker.brokerInfo) {
+                            if (broker.deadBrockers.isEmpty()) {
+                                if (!br.toString().equals(broker.addressInfo.toString())) {
+                                    c.redirectClient2(br);
+                                    break;
+                                }
+                            } else {
+                                for (Integer p : broker.deadBrockers) {
+                                    if (br.getPort() != p && br.getPort() != broker.addressInfo.getPort()) {
+                                        c.redirectClient2(br);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 // close socket connections with other brokers
                 for (ObjectOutputStream oos:broker.writers)
                     oos.close();
@@ -101,6 +126,7 @@ public class Broker implements BrokerInterface
                 if(rightBroker < 0){
                     rightBroker = abs(rightBroker);
                 }
+                topicToSubs.put(topicName,new ArrayList<>());
                 if (brokerNumToAddress.get(rightBroker).equals(addressInfo.toString())) {
                     String temp_imgPath = imgPath + counter + ".jpg";
                     //imgPath+=counter;
@@ -126,6 +152,8 @@ public class Broker implements BrokerInterface
         localPortToPort = new HashMap<>();
         addressToHash = new HashMap<>();
         topicToSubs = new HashMap<>();
+        deadBrockers = new ArrayList<>();
+        chs = new ArrayList<>();
         try  {
             serverSocket = new ServerSocket(addressInfo.getPort(),20);
             FileWriter fileWriter = new FileWriter("src/com/ds/brokers_up.txt", true);
@@ -176,11 +204,12 @@ public class Broker implements BrokerInterface
                             broker.addressToHash.put(newBrokerAddress, sha1(newBrokerAddress.toString()));
                             broker.addressToSocketMapper.put(newBrokerAddress.toString(), addressToSocketMapper.size());
                             broker.listen(socket, ois);
-                            broker.disconnect(socket, ois);
+                            //broker.disconnect(socket, ois);
                             continue;
                         }
                         broker.logToConsole("A new Client (" + s + ") has connected");
                         ClientHandler clientHandler = new ClientHandler(socket, broker, oos, ois);
+                        chs.add(clientHandler);
                         Thread thread = new Thread(clientHandler);
                         thread.start();
                     }
@@ -212,13 +241,19 @@ public class Broker implements BrokerInterface
         }
 
         topicToSubs.put(topic_name,getTopic(topic_name).getClientsSubbed());
-        updateBrokers();
+        updateBrokersOnSubs();
     }
 
-    public void updateBrokers(){
+    public synchronized void createTopic1(String topic_name) {
+        Topic topic = new Topic(topic_name, imgPath + "default_topic_image.png");
+        topics.add(topic);
+        topicToSubs.put(topic_name,getTopic(topic_name).getClientsSubbed());
+        updateBrokersOnSubs();
+    }
+
+    public void updateBrokersOnSubs(){
         for (int i =0; i< sockets.size();i++){
-            System.out.println(topicToSubs);
-            sendToOtherBroker(i,topicToSubs);
+            sendToOtherBroker1(i,topicToSubs);
         }
     }
 
@@ -226,7 +261,7 @@ public class Broker implements BrokerInterface
         getTopic(topic).subscribe(username);
 
         topicToSubs.put(topic,getTopic(topic).getClientsSubbed());
-        updateBrokers();
+        updateBrokersOnSubs();
     }
 
     public synchronized void unsubscribe(String topic_name, String username) {
@@ -238,7 +273,7 @@ public class Broker implements BrokerInterface
             topics.get(topics.indexOf(topic)).unsubscribe(username);
 
             topicToSubs.put(topic_name,getTopic(topic_name).getClientsSubbed());
-            updateBrokers();
+            updateBrokersOnSubs();
         }
     }
 
@@ -327,12 +362,8 @@ public class Broker implements BrokerInterface
                 while (!socket.isClosed()) {
                     try {
                         Object msg2 = ois.readObject();
-                        System.out.println("Good " + msg2);
                         if(msg2 instanceof HashMap){
                             HashMap<String,ArrayList<String>> mapinfo = (HashMap<String,ArrayList<String>>) msg2;
-                            System.out.println("Map Info " + mapinfo);
-                            System.out.println(msg2);
-                            System.out.println(((HashMap<?, ?>) msg2).get("zzzzzzzzzzzzzzzzzzz"));
                         }else {
                             Value msg = (Value) ois.readObject();
                             System.out.println("LISTEN TOY BROKER: " + msg);
@@ -357,32 +388,55 @@ public class Broker implements BrokerInterface
                                 String username = info[1];
                                 subscribe(topicName, username);
                             }
-                            //if another broker wants to get the available topics
-//                        else if (msg.getMessage().equals("GET_AVAILABLE_TOPICS")) {
-//                            ArrayList<String> topicNames = getTopicNames();
-//                            sendToOtherBroker(brokerIndex, new Value("GET_TOPICS"));
-//                            writers.get(brokerIndex).writeObject(topicNames);
-//
-//                        }
-//                        //get the topics that we asked for
-//                        else if (msg.getMessage().contains("GET_TOPICS")) {
-//                            allTopicNames.add(msg.getMessage().split(" ")[1]);
-//                        }
-//                        //if another broker wants to get the available topics images
-//                        else if (msg.getMessage().equals("GET_AVAILABLE_TOPICS_IMAGES")) {
-//                            ArrayList<MultimediaFile> topicNames = getTopicImages();
-//                            for (MultimediaFile topicImage : topicNames) {
-//                                sendToOtherBroker(brokerIndex, new Value("GET_TOPIC_IMAGE"));
-//                                sendToOtherBroker(brokerIndex, new Value(topicImage));
-//                            }
-//                        }
-//                        //get the topic images that we asked for
-//                        else if (msg.getMessage().contains("GET_TOPIC_IMAGE")) {
-//                            MultimediaFile topicImage = ((Value)ois.readObject()).getMultiMediaFile();
-//                            allTopicImages.add(topicImage);
-//                        }
                         }
                     } catch (Exception ignored) {
+                        try {
+                            int index = sockets.indexOf(socket);
+                            for(BrokerAddressInfo br : brokerInfo){
+                                if(br.getPort() == localPortToPort.get(socket.getPort())){
+                                    brokerInfo.remove(br);
+                                    deadBrockers.add(localPortToPort.get(socket.getPort()));
+                                    break;
+                                }else if(br.getPort() == socket.getPort()){
+                                    brokerInfo.remove(br);
+                                    deadBrockers.add(localPortToPort.get(socket.getLocalPort()));
+                                    break;
+                                }
+                            }
+                            System.out.println(deadBrockers);
+                            logToConsole("removed socket");
+                            sockets.remove(index);
+                            readers.remove(index);
+                            writers.remove(index);
+                            topics.clear();
+                            BrokerAddressInfo rightBroker;
+                            //Redistribution
+                            for(String key : topicToSubs.keySet()){
+                                rightBroker = findResponsibleBrokerAddress(key);
+                                topictoBroker.put(key,rightBroker);
+                            }
+                            System.out.println("topicToBroker: " + topictoBroker);
+                            for(String key : topictoBroker.keySet()){
+                                int i=0;
+                                if(topictoBroker.get(key).equals(addressInfo)){
+                                    if(!topicToSubs.get(key).isEmpty()){
+                                        createTopic(key,topicToSubs.get(key).get(0));
+                                    }else{
+                                        createTopic1(key);
+                                    }
+                                    for(String subs: topicToSubs.get(key)){
+                                        if(i!=0){
+                                            subscribe(key,subs);
+                                        }
+                                        i++;
+                                    }
+
+                                }
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                        break;
                     }
                 }
             }
@@ -391,12 +445,9 @@ public class Broker implements BrokerInterface
 
     public synchronized void sendToOtherBroker(int broker, Value v) {
         try {
-            System.out.println("send to broker: " + broker);
-            System.out.println("value: " + v);
             writers.get(broker).writeObject(v);
             writers.get(broker).flush();
         } catch (Exception e) {
-            e.printStackTrace();
         }
     }
 
@@ -410,6 +461,18 @@ public class Broker implements BrokerInterface
             e.printStackTrace();
         }
     }
+
+    public synchronized void sendToOtherBroker1(int broker, HashMap<String,ArrayList<String>> info) {
+        try {
+            writers.get(broker).writeObject(info);
+            writers.get(broker).flush();
+            writers.get(broker).reset();
+        } catch (Exception e) {
+
+        }
+    }
+
+
 
     @Override
     public void connect() {
@@ -463,7 +526,7 @@ public class Broker implements BrokerInterface
                         addressToHash.put(newBrokerAddress, sha1(newBrokerAddress.toString()));
                         addressToSocketMapper.put(newBrokerAddress.toString(), addressToSocketMapper.size());
                         listen(socket, ois);
-                        disconnect(socket, ois);
+                        //disconnect(socket, ois);
                     } catch (Exception e) {
                         System.out.println("destination unreachable");
                     }
@@ -581,7 +644,7 @@ public class Broker implements BrokerInterface
 
     public BrokerAddressInfo findResponsibleBrokerAddress(String topic){
         BigInteger topicHashKey = sha1(topic);
-        int rightBroker = topicHashKey.intValue() % 3;
+        int rightBroker = topicHashKey.intValue() % (sockets.size()+1);
         if(rightBroker < 0){
             rightBroker = abs(rightBroker);
         }
@@ -590,8 +653,26 @@ public class Broker implements BrokerInterface
                 return address;
             }
         }
-        return null;
+        return addressInfo;
     }
+
+    public boolean getRandomBoolean() {
+        Random random = new Random();
+        return random.nextBoolean();
+    }
+
+    public synchronized HashMap<String, BrokerAddressInfo> getTopictoBroker() {
+        return topictoBroker;
+    }
+
+    public synchronized void setTopictoBroker(HashMap<String, BrokerAddressInfo> topictoBroker) {
+        this.topictoBroker = topictoBroker;
+    }
+
+    public ArrayList<Socket> getSockets(){
+        return sockets;
+    }
+
     public synchronized boolean checkRightBroker(BrokerAddressInfo rightBrokerAddress, BrokerAddressInfo addressInfo) {
         System.out.println(rightBrokerAddress.equals(addressInfo));
         if(!rightBrokerAddress.equals(addressInfo)){

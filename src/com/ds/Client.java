@@ -363,6 +363,14 @@ public class Client implements Publisher, Consumer
                                 retrieved_topic_images = topic_images;
                                 continue;
                             }
+                            else if(msg.equals("WRONG_BROKER_NOTOPIC")){
+                                String correct_address = ((Value)reader.readObject()).getMessage();
+                                currentBroker = correct_address;
+                                String[] info = correct_address.split(":");
+                                disconnect();
+                                reconnect1(new BrokerAddressInfo(info[0], Integer.parseInt(info[1])));
+                                continue;
+                            }
                             //check if client asked for story
                             else if (msg.equalsIgnoreCase("GET_STORY")) {
                                 get_stories_count = ((Integer)reader.readObject());
@@ -400,7 +408,17 @@ public class Client implements Publisher, Consumer
             }
         }).start();
     }
-
+    public void reconnect1(BrokerAddressInfo address) {
+        try {
+            socket = new Socket(address.getIp(), address.getPort());
+            writer = new ObjectOutputStream(socket.getOutputStream());
+            writer.writeObject(getUsername());  //readObject ston broker
+            reader = new ObjectInputStream(socket.getInputStream());
+            init();  //readObject ston clientHandler
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
     /**
      * Enters a topic conversation
      * @param topic
